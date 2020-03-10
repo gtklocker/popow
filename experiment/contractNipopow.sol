@@ -17,18 +17,8 @@ contract Crosschain {
   struct Nipopow {
     mapping (bytes32 => bool) curProofMap;
     mapping (uint => uint) levelCounter;
-    // Stores the block precedence in the proofs.
-    // For example: Given proof [1, 2, 3] we have 3 -> 2, 2 -> 1.
-    // Used for preventing filling the blockDAG with duplicates.
-    mapping (bytes32 => mapping(bytes32 => bool)) blockPrecedence;
-    // Stores DAG of blocks.
-    mapping (bytes32 => bytes32[]) blockDAG;
     // Stores the hashes of the block headers of the best proof.
-
     mapping (bytes32 => bool) visitedBlock;
-
-    bytes32[] traversal_stack;
-    bytes32[] ancestors;
     bytes32[] best_proof;
   }
 
@@ -78,69 +68,9 @@ contract Crosschain {
 
   }
 
-  function add_proof_to_dag(Nipopow storage nipopow,
-    bytes32[] memory proof) internal {
-    for (uint i = 1; i < proof.length; i++) {
-      if (!nipopow.blockPrecedence[proof[i - 1]][proof[i]]) {
-        nipopow.blockPrecedence[proof[i - 1]][proof[i]] = true;
-        nipopow.blockDAG[proof[i - 1]].push(proof[i]);
-      }
-    }
-  }
-
-  function find_ancestors(Nipopow storage nipopow,
-    bytes32 last_block) internal {
-    nipopow.traversal_stack.push(last_block);
-
-    while(nipopow.traversal_stack.length != 0) {
-      bytes32 current_block =
-      nipopow.traversal_stack[nipopow.traversal_stack.length - 1];
-
-      nipopow.visitedBlock[current_block] = true;
-      nipopow.ancestors.push(current_block);
-      require(nipopow.traversal_stack.length > 0, 'Stack length <= 0');
-      nipopow.traversal_stack.pop();
-
-      for (uint i = 0; i < nipopow.blockDAG[current_block].length; i++) {
-        if (!nipopow.visitedBlock[nipopow.blockDAG[current_block][i]]) {
-          nipopow.traversal_stack.push(nipopow.blockDAG[current_block][i]);
-        }
-      }
-    }
-  }
-
-  /*function ancestors_traversal(Nipopow storage nipopow,
-    bytes32 current_block, bytes32 block_of_interest) internal returns(bool) {
-    if (current_block == block_of_interest) {
-      return true;
-    }
-    // The graph is a DAG so we can do DFS without worrying about cycles.
-    // We do keep a visited array because it is more expensive in terms of gas.
-    // TODO: Depends on how expensive is the predicate evaluation which could
-    // cost a lot of gas. Consider the gas trade-offs.
-    bool predicate_value = false;
-    for (uint i = 0; i < nipopow.blockDAG[current_block].length; i++) {
-      predicate_value = ancestors_traversal(nipopow,
-        blockDAG[current_block][i],
-        block_of_interest) || predicate_value;
-    }
-    return predicate_value;
-  }*/
-
   function predicate(Nipopow storage proof, bytes32 block_of_interest) private
     returns (bool) {
-    bool _predicate = false;
-    for (uint i = 0; i < proof.ancestors.length; i++) {
-      if (proof.ancestors[i] == block_of_interest) {
-        _predicate = true;
-      }
-      // Clean the stored memory.
-      proof.visitedBlock[proof.ancestors[i]] = false;
-    }
-
-    delete proof.ancestors;
-
-    return _predicate;
+    return block_of_interest in proof.best_proof;
   }
 
   function get_lca(Nipopow storage nipopow, bytes32[] memory c_proof)
@@ -309,16 +239,15 @@ contract Crosschain {
     validate_interlink(headers, contesting_proof, siblings);
 
     if (compare_proofs(proof, contesting_proof)) {
+      b = lca(proof, contesting_proof);
+      require(proof{:b} subset of contesting_proof{:b});
       proof.best_proof = contesting_proof;
-      // Only when we get the "best" we add them to the DAG.
-      add_proof_to_dag(proof, contesting_proof);
     }
     else {
         return true;
     }
 
-    find_ancestors(proof, proof.best_proof[0]);
-    return predicate(proof, hash_header(block_of_interest));
+    return predicate(proof.best_proof, block_of_interest);
   }
 
   // TODO: Deleting a mapping is impossible without knowing
