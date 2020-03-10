@@ -247,7 +247,7 @@ contract Crosschain {
         return true;
     }
 
-    return predicate(proof.best_proof, block_of_interest);
+    return predicate(proof, hash_header(block_of_interest));
   }
 
   // TODO: Deleting a mapping is impossible without knowing
